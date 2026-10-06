@@ -7,6 +7,9 @@
  ******************************************************************************
  */
 
+#include <algorithm>
+#include <string>
+
 #include "xenia/base/clock.h"
 #include "xenia/base/cvar.h"
 #include "xenia/base/logging.h"
@@ -1034,6 +1037,117 @@ dword_result_t XamUpdateGetCurrentSystemVersion_entry() {
   return kBaseKernelBuildVersion;
 }
 DECLARE_XAM_EXPORT1(XamUpdateGetCurrentSystemVersion, kNone, kStub);
+
+// -----------------------------------------------------------------------------
+// Dashboard bring-up tracing.
+//
+// The signatures of the dashboard-only exports below are not documented, so
+// these handlers only log the raw argument registers (and a short preview of
+// anything that looks like a pointer to a string) and then return 0, which is
+// exactly what an unresolved import already returns. Behaviour is unchanged;
+// the point is to learn the signatures from the next log.
+// -----------------------------------------------------------------------------
+
+// Returns a short printable preview of guest memory at |address|: an ASCII
+// string, a UTF-16BE string, or the first raw bytes. Returns an empty string if
+// the address is not committed guest memory. The read never leaves the current
+// 4 KiB page, so it cannot run past committed memory.
+static std::string PreviewGuestMemory(uint32_t address) {
+  if (address < 0x10000) {
+    return std::string();
+  }
+  auto heap = kernel_memory()->LookupHeap(address);
+  HeapAllocationInfo info;
+  if (!heap || !heap->QueryRegionInfo(address, &info) ||
+      !(info.state & kMemoryAllocationCommit)) {
+    return std::string();
+  }
+  const uint32_t max_bytes =
+      std::min<uint32_t>(64, 0x1000 - (address & 0xFFF));
+  const uint8_t* p = kernel_memory()->TranslateVirtual<const uint8_t*>(address);
+  auto printable = [](uint8_t c) { return c >= 0x20 && c < 0x7F; };
+
+  // ASCII.
+  uint32_t length = 0;
+  while (length < max_bytes && printable(p[length])) {
+    ++length;
+  }
+  if (length >= 3 && (length == max_bytes || p[length] == 0)) {
+    return fmt::format("\"{}\"",
+                       std::string(reinterpret_cast<const char*>(p), length));
+  }
+
+  // UTF-16BE (only the low byte of each character is shown).
+  std::string wide;
+  for (uint32_t i = 0; i + 1 < max_bytes && p[i] == 0 && printable(p[i + 1]);
+       i += 2) {
+    wide.push_back(static_cast<char>(p[i + 1]));
+  }
+  if (wide.size() >= 3) {
+    return fmt::format("L\"{}\"", wide);
+  }
+
+  // Raw bytes.
+  std::string hex;
+  for (uint32_t i = 0; i < std::min<uint32_t>(16, max_bytes); ++i) {
+    hex += fmt::format("{:02X} ", p[i]);
+  }
+  return fmt::format("[{}]", hex);
+}
+
+static void TraceDashboardCall(const char* name, const ppc_context_t& ctx) {
+  std::string args;
+  for (int reg = 3; reg <= 8; ++reg) {
+    const uint32_t value = static_cast<uint32_t>(ctx->r[reg]);
+    args += fmt::format(" r{}={:08X}", reg, value);
+    const std::string preview = PreviewGuestMemory(value);
+    if (!preview.empty()) {
+      args += fmt::format(" ->{}", preview);
+    }
+  }
+  XELOGW("DASHTRACE {}:{}", name, args);
+}
+
+dword_result_t XdfInitialize_entry(const ppc_context_t& ctx) {
+  TraceDashboardCall("XdfInitialize", ctx);
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XdfInitialize, kNone, kStub);
+
+dword_result_t XdfLoadXexFromCache_entry(const ppc_context_t& ctx) {
+  TraceDashboardCall("XdfLoadXexFromCache", ctx);
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XdfLoadXexFromCache, kNone, kStub);
+
+dword_result_t XamGetDefaultSystemImage_entry(const ppc_context_t& ctx) {
+  TraceDashboardCall("XamGetDefaultSystemImage", ctx);
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XamGetDefaultSystemImage, kNone, kStub);
+
+dword_result_t XamPackageManagerGetExperienceMode_entry(
+    const ppc_context_t& ctx) {
+  TraceDashboardCall("XamPackageManagerGetExperienceMode", ctx);
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XamPackageManagerGetExperienceMode, kNone, kStub);
+
+dword_result_t XamPackageManagerFindPackageContainingIndexedXEX_entry(
+    const ppc_context_t& ctx) {
+  TraceDashboardCall("XamPackageManagerFindPackageContainingIndexedXEX", ctx);
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XamPackageManagerFindPackageContainingIndexedXEX, kNone,
+                    kStub);
+
+dword_result_t XamPackageManagerGetFeatureRequiresUpdateStrings_entry(
+    const ppc_context_t& ctx) {
+  TraceDashboardCall("XamPackageManagerGetFeatureRequiresUpdateStrings", ctx);
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XamPackageManagerGetFeatureRequiresUpdateStrings, kNone,
+                    kStub);
 
 }  // namespace xam
 }  // namespace kernel
