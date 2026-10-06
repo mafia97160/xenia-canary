@@ -1116,7 +1116,12 @@ DECLARE_XAM_EXPORT1(XdfInitialize, kNone, kStub);
 
 dword_result_t XdfLoadXexFromCache_entry(const ppc_context_t& ctx) {
   TraceDashboardCall("XdfLoadXexFromCache", ctx);
-  return 0;
+  // Observed: r3 = module file name (e.g. "dash.privacyui.xex"). The real
+  // function loads a dashboard plugin from the feature cache; that cache does
+  // not exist here, so report "not found" (negative status) instead of the
+  // fake success that made the dashboard look up CreateDashAppInstance in
+  // itself. The dashboard's reaction to a failure is what we want to see next.
+  return X_STATUS_NO_SUCH_FILE;
 }
 DECLARE_XAM_EXPORT1(XdfLoadXexFromCache, kNone, kStub);
 
