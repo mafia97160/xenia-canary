@@ -8,9 +8,14 @@
  */
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <string>
 
 #include "xenia/base/clock.h"
+#include "xenia/base/filesystem.h"
+#include "xenia/base/platform.h"
+#include "xenia/vfs/devices/host_path_entry.h"
 #include "xenia/base/cvar.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/string_util.h"
@@ -33,6 +38,10 @@
 #include "xenia/ui/window.h"
 #include "xenia/ui/windowed_app_context.h"
 #include "xenia/xbox.h"
+
+#if XE_PLATFORM_WIN32
+#include "xenia/base/platform_win.h"
+#endif
 
 #include "third_party/fmt/include/fmt/format.h"
 #include "third_party/fmt/include/fmt/xchar.h"
@@ -422,6 +431,98 @@ void XamLoaderRegisterLaunchRequestCallback_entry(dword_t callback) {
 DECLARE_XAM_EXPORT1(XamLoaderRegisterLaunchRequestCallback, kNone,
                     kImplemented);
 
+// -----------------------------------------------------------------------------
+// Console mode: switching between the dashboard and other system modules.
+//
+// Xenia runs one title per process. To emulate the console swapping programs
+// (dashboard -> avatar editor -> dashboard), the next module is written to the
+// existing loader-data file and Xenia restarts itself, which loads it at
+// startup. The dashboard's location is remembered in a small side file so the
+// module that is closing knows where to return.
+// -----------------------------------------------------------------------------
+static constexpr const char* kDashReturnFileName = "xenia_dashboard_return.txt";
+
+static std::filesystem::path GetExecutableHostPath() {
+  auto module = kernel_state()->GetExecutableModule();
+  if (!module) {
+    return std::filesystem::path();
+  }
+  auto entry = kernel_state()->file_system()->ResolvePath(module->path());
+  auto host_entry = dynamic_cast<vfs::HostPathEntry*>(entry);
+  return host_entry ? host_entry->host_path() : std::filesystem::path();
+}
+
+static bool RestartEmulatorProcess() {
+#if XE_PLATFORM_WIN32
+  wchar_t exe_path[MAX_PATH] = {};
+  if (!GetModuleFileNameW(nullptr, exe_path, MAX_PATH)) {
+    return false;
+  }
+  // No arguments: the loader data written below decides what runs.
+  std::wstring command_line = L"\"" + std::wstring(exe_path) + L"\"";
+  STARTUPINFOW startup_info = {};
+  startup_info.cb = sizeof(startup_info);
+  PROCESS_INFORMATION process_info = {};
+  if (!CreateProcessW(exe_path, command_line.data(), nullptr, nullptr, FALSE, 0,
+                      nullptr, nullptr, &startup_info, &process_info)) {
+    return false;
+  }
+  CloseHandle(process_info.hThread);
+  CloseHandle(process_info.hProcess);
+  return true;
+#else
+  return false;
+#endif
+}
+
+// Makes |target| (host path to a .xex) the next module and restarts Xenia.
+// Returns only on failure.
+static bool SwitchToModule(const std::filesystem::path& target) {
+  auto xam = kernel_state()->GetKernelModule<XamModule>("xam.xex");
+  if (!xam) {
+    return false;
+  }
+  auto& loader_data = xam->loader_data();
+  loader_data.host_path = xe::path_to_utf8(target);
+  loader_data.launch_path = xe::path_to_utf8(target.filename());
+  loader_data.launch_flags = 0;
+  loader_data.launch_data.clear();
+  xam->SaveLoaderData();
+  XELOGW("DASHTRACE switching to module {}", loader_data.host_path);
+  if (!RestartEmulatorProcess()) {
+    return false;
+  }
+  config::SaveConfig();
+  xe::FlushLog();
+  std::quick_exit(0);
+}
+
+// Called when a module closes: goes back to the dashboard if one was recorded.
+// Returns only if there is nothing to go back to (or it failed).
+static bool TryReturnToDashboard() {
+  std::string line;
+  {
+    std::ifstream in(kDashReturnFileName);
+    if (!in || !std::getline(in, line)) {
+      return false;
+    }
+  }
+  // Consume the record so the dashboard itself never loops back to itself.
+  std::error_code error;
+  std::filesystem::remove(kDashReturnFileName, error);
+  while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+    line.pop_back();
+  }
+  if (line.empty()) {
+    return false;
+  }
+  const std::filesystem::path dashboard = xe::to_path(line);
+  if (GetExecutableHostPath().filename() == dashboard.filename()) {
+    return false;
+  }
+  return SwitchToModule(dashboard);
+}
+
 dword_result_t XamLoaderSetLaunchData_entry(lpvoid_t data, dword_t size) {
   auto xam = kernel_state()->GetKernelModule<XamModule>("xam.xex");
   auto& loader_data = xam->loader_data();
@@ -481,6 +582,7 @@ void XamLoaderLaunchTitle_entry(lpstring_t raw_name_ptr, dword_t flags) {
         "Title closed with new launch data. \nPlease restart Xenia. "
         "Game will be loaded automatically.";
   } else {
+    TryReturnToDashboard();
     title = "Title terminated";
     message = "Game requested exit to dashboard.";
     assert_always("Game requested exit to dashboard via XamLoaderLaunchTitle");
@@ -514,6 +616,7 @@ void XamLoaderLaunchTitle_entry(lpstring_t raw_name_ptr, dword_t flags) {
 DECLARE_XAM_EXPORT1(XamLoaderLaunchTitle, kNone, kSketchy);
 
 void XamLoaderTerminateTitle_entry() {
+  TryReturnToDashboard();
   std::string title = "Title terminated";
   std::string message = "Game requested exit to dashboard.";
   assert_always("Game requested exit to dashboard via XamLoaderTerminateTitle");
@@ -1166,7 +1269,32 @@ DECLARE_XAM_EXPORT1(XdfCacheItem, kNone, kStub);
 
 dword_result_t XamLoaderLaunchTitleEx_entry(const ppc_context_t& ctx) {
   TraceDashboardCall("XamLoaderLaunchTitleEx", ctx);
-  return 0;
+  // Observed: "Personnaliser l'avatar" calls this with r3=r4=r5=0, r6=0x12,
+  // r7=4, i.e. no file name; the target is chosen by the reason in r6.
+  // Only that one reason is known so far.
+  const uint32_t reason = static_cast<uint32_t>(ctx->r[6]);
+  const char* module_name = reason == 0x12 ? "AvatarEditor.xex" : nullptr;
+  if (!module_name) {
+    XELOGW("DASHTRACE XamLoaderLaunchTitleEx: unknown launch reason {:08X}",
+           reason);
+    return 0;
+  }
+  const std::filesystem::path current = GetExecutableHostPath();
+  if (current.empty()) {
+    XELOGW("DASHTRACE cannot find the host path of the running module");
+    return 0;
+  }
+  const std::filesystem::path target = current.parent_path() / module_name;
+  if (!std::filesystem::exists(target)) {
+    XELOGW("DASHTRACE {} not found next to the dashboard", module_name);
+    return 0;
+  }
+  {
+    std::ofstream out(kDashReturnFileName, std::ios::trunc);
+    out << xe::path_to_utf8(current) << "\n";
+  }
+  SwitchToModule(target);
+  return 0;  // Only reached if the switch failed.
 }
 DECLARE_XAM_EXPORT1(XamLoaderLaunchTitleEx, kNone, kStub);
 
