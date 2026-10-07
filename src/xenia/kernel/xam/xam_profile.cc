@@ -48,6 +48,9 @@ dword_result_t XamProfileOpen_entry(
   /* Notes:
       - If xuid is not local then returns X_ERROR_INVALID_PARAMETER
   */
+  XELOGW("DASHTRACE XamProfileOpen: xuid={:016X} mount='{}' flags={:X}",
+         static_cast<uint64_t>(xuid), mount_path.value(),
+         static_cast<uint32_t>(flags));
   if (!kernel_state()->xam_state()->profile_manager()->MountProfile(
           xuid, mount_path.value())) {
     return X_ERROR_INVALID_PARAMETER;
