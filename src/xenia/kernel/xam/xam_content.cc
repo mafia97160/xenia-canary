@@ -297,6 +297,10 @@ dword_result_t xeXamContentCreate(dword_t user_index, lpstring_t root_name,
                                   lpdword_t license_mask_ptr,
                                   dword_t cache_size, qword_t content_size,
                                   pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
+  XELOGW("DASHTRACE xeXamContentCreate called: root='{}' flags={:X} user={:X}",
+         root_name ? root_name.value() : std::string(), flags & 0xF,
+         static_cast<uint32_t>(user_index));
+
   uint64_t xuid = 0;
   if (user_index != XUserIndexNone && user_index != XUserIndexAny) {
     const auto& user = kernel_state()->xam_state()->GetUserProfile(user_index);
