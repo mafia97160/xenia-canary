@@ -592,6 +592,33 @@ void RegisterVideoExports(xe::cpu::ExportResolver* export_resolver,
                                              10000);
 }
 
+// Dashboard bring-up tracing (display settings). Trace-only: logs the raw
+// argument registers and returns 0, exactly what an unresolved import returns.
+static void TraceVideoCall(const char* name, const ppc_context_t& ctx) {
+  XELOGW("DASHTRACE {}: r3={:08X} r4={:08X} r5={:08X} r6={:08X} r7={:08X}",
+         name, static_cast<uint32_t>(ctx->r[3]), static_cast<uint32_t>(ctx->r[4]),
+         static_cast<uint32_t>(ctx->r[5]), static_cast<uint32_t>(ctx->r[6]),
+         static_cast<uint32_t>(ctx->r[7]));
+}
+
+dword_result_t VdGetDisplayDiscoveryData_entry(const ppc_context_t& ctx) {
+  TraceVideoCall("VdGetDisplayDiscoveryData", ctx);
+  return 0;
+}
+DECLARE_XBOXKRNL_EXPORT1(VdGetDisplayDiscoveryData, kVideo, kStub);
+
+dword_result_t VdEnumerateVideoModes_entry(const ppc_context_t& ctx) {
+  TraceVideoCall("VdEnumerateVideoModes", ctx);
+  return 0;
+}
+DECLARE_XBOXKRNL_EXPORT1(VdEnumerateVideoModes, kVideo, kStub);
+
+dword_result_t VdGetOption_entry(const ppc_context_t& ctx) {
+  TraceVideoCall("VdGetOption", ctx);
+  return 0;
+}
+DECLARE_XBOXKRNL_EXPORT1(VdGetOption, kVideo, kStub);
+
 }  // namespace xboxkrnl
 }  // namespace kernel
 }  // namespace xe
