@@ -1154,6 +1154,40 @@ dword_result_t XamPackageManagerGetFeatureRequiresUpdateStrings_entry(
 DECLARE_XAM_EXPORT1(XamPackageManagerGetFeatureRequiresUpdateStrings, kNone,
                     kStub);
 
+// Wave 3: more dashboard-only exports (trace only, return 0 like an
+// unresolved import). The launch ones let us see what the dashboard passes
+// when a title/disc is selected, without the process exiting.
+
+dword_result_t XdfCacheItem_entry(const ppc_context_t& ctx) {
+  TraceDashboardCall("XdfCacheItem", ctx);
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XdfCacheItem, kNone, kStub);
+
+dword_result_t XamLoaderLaunchTitleEx_entry(const ppc_context_t& ctx) {
+  TraceDashboardCall("XamLoaderLaunchTitleEx", ctx);
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XamLoaderLaunchTitleEx, kNone, kStub);
+
+dword_result_t XamLoaderLaunchTitleOnDvd_entry(const ppc_context_t& ctx) {
+  TraceDashboardCall("XamLoaderLaunchTitleOnDvd", ctx);
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XamLoaderLaunchTitleOnDvd, kNone, kStub);
+
+dword_result_t XamLoaderLaunchTitleForReason_entry(const ppc_context_t& ctx) {
+  TraceDashboardCall("XamLoaderLaunchTitleForReason", ctx);
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XamLoaderLaunchTitleForReason, kNone, kStub);
+
+dword_result_t XamLoaderGetPriorTitleId_entry(const ppc_context_t& ctx) {
+  TraceDashboardCall("XamLoaderGetPriorTitleId", ctx);
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XamLoaderGetPriorTitleId, kNone, kStub);
+
 }  // namespace xam
 }  // namespace kernel
 }  // namespace xe
