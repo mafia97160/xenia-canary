@@ -145,6 +145,20 @@ dword_result_t NtReadFile_entry(dword_t file_handle, dword_t event_handle,
     result = X_STATUS_INVALID_HANDLE;
   }
 
+  if (file && file->entry()) {
+    const auto& traced_path = file->entry()->path();
+    if (traced_path.find("Thematic") != std::string::npos ||
+        traced_path.find("Vision") != std::string::npos ||
+        traced_path.find("Theme") != std::string::npos ||
+        traced_path.find(".png") != std::string::npos ||
+        traced_path.find(".jpg") != std::string::npos ||
+        traced_path.find(".ini") != std::string::npos) {
+      XELOGW("DASHTRACE NtReadFile '{}' len={} offset={}", traced_path,
+             static_cast<uint32_t>(buffer_length),
+             byte_offset_ptr ? static_cast<int64_t>(*byte_offset_ptr) : -1);
+    }
+  }
+
   if (XSUCCEEDED(result)) {
     if (true || file->is_synchronous()) {
       // Synchronous.
