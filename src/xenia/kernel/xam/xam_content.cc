@@ -421,7 +421,7 @@ dword_result_t xeXamContentCreate(dword_t user_index, lpstring_t root_name,
       *license_mask_ptr = content_license;
     }
 
-    if (root_name == "SkinRoot") {
+    {
       XELOGW(
           "DASHTRACE ContentCreate root={} flags={:X} type={:08X} "
           "title={:08X} file='{}' disposition={} result={:08X}",
