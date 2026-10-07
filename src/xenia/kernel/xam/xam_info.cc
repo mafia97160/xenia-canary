@@ -8,6 +8,7 @@
  */
 
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -1244,6 +1245,33 @@ DECLARE_XAM_EXPORT1(XamPackageManagerGetExperienceMode, kNone, kStub);
 dword_result_t XamPackageManagerFindPackageContainingIndexedXEX_entry(
     const ppc_context_t& ctx) {
   TraceDashboardCall("XamPackageManagerFindPackageContainingIndexedXEX", ctx);
+  // Observed: r3 = file name ("ThemesIndex", "database.gmsodf"), r4 = output
+  // buffer, r5 = its size (0x104). Guess: the real function writes the
+  // location of the package that holds the file. Here the files sit loose next
+  // to the dashboard, so answer with the dashboard's own (guest) folder.
+  const uint32_t name_ptr = static_cast<uint32_t>(ctx->r[3]);
+  const uint32_t out_ptr = static_cast<uint32_t>(ctx->r[4]);
+  const uint32_t out_size = static_cast<uint32_t>(ctx->r[5]);
+  if (name_ptr < 0x10000 || out_ptr < 0x10000 || out_size < 2) {
+    return 0;
+  }
+  const char* name_raw =
+      kernel_memory()->TranslateVirtual<const char*>(name_ptr);
+  const std::string name(name_raw, strnlen(name_raw, 260));
+  auto module = kernel_state()->GetExecutableModule();
+  const std::filesystem::path host = GetExecutableHostPath();
+  if (!module || host.empty() || name.empty() ||
+      !std::filesystem::exists(host.parent_path() / name)) {
+    return 0;
+  }
+  std::string guest_dir = module->path();
+  guest_dir.resize(guest_dir.find_last_of("\\/") + 1);
+  if (guest_dir.size() + 1 > out_size) {
+    return 0;
+  }
+  char* out = kernel_memory()->TranslateVirtual<char*>(out_ptr);
+  std::memcpy(out, guest_dir.c_str(), guest_dir.size() + 1);
+  XELOGW("DASHTRACE answered '{}' with folder {}", name, guest_dir);
   return 0;
 }
 DECLARE_XAM_EXPORT1(XamPackageManagerFindPackageContainingIndexedXEX, kNone,
