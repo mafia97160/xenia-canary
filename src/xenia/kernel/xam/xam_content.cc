@@ -425,7 +425,8 @@ dword_result_t xeXamContentCreate(dword_t user_index, lpstring_t root_name,
       XELOGW(
           "DASHTRACE ContentCreate root={} flags={:X} type={:08X} "
           "title={:08X} file='{}' disposition={} result={:08X}",
-          root_name, flags & 0xF, static_cast<uint32_t>(content_data.content_type),
+          root_name, flags & 0xF,
+          static_cast<uint32_t>(content_data.content_type.get()),
           static_cast<uint32_t>(content_data.title_id),
           xe::string_util::trim(content_data.file_name()),
           static_cast<uint32_t>(disposition), static_cast<uint32_t>(result));
