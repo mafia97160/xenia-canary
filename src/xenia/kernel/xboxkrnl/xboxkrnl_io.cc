@@ -326,6 +326,12 @@ dword_result_t NtWriteFile_entry(dword_t file_handle, dword_t event_handle,
     result = X_STATUS_INVALID_HANDLE;
   }
 
+  if (file && file->entry()) {
+    XELOGW("DASHTRACE NtWriteFile '{}' len={} offset={}",
+           file->entry()->path(), static_cast<uint32_t>(buffer_length),
+           byte_offset_ptr ? static_cast<int64_t>(*byte_offset_ptr) : -1);
+  }
+
   // Execute write.
   if (XSUCCEEDED(result)) {
     // TODO(benvanik): async path.

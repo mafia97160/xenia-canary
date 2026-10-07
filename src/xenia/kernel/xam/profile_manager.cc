@@ -252,6 +252,9 @@ bool ProfileManager::MountProfile(const uint64_t xuid, std::string mount_path) {
   mount_path =
       !mount_path.empty() ? mount_path : fmt::format(kDefaultMountFormat, xuid);
 
+  XELOGW("DASHTRACE MountProfile '{}' as '{}' is_directory={} exists={}",
+         profile_path, mount_path, std::filesystem::is_directory(profile_path),
+         std::filesystem::exists(profile_path));
   if (!content_manager_->OpenAndMountPackage(profile_path, mount_path)) {
     XELOGE(
         "MountProfile: Unable to mount {} profile; file not found or "
