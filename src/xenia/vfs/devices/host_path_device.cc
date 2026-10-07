@@ -12,6 +12,8 @@
 #include "xenia/base/filesystem.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
+#include "xenia/base/string.h"
+#include "xenia/base/utf8.h"
 #include "xenia/kernel/xfile.h"
 #include "xenia/vfs/devices/host_path_entry.h"
 
@@ -57,7 +59,52 @@ Entry* HostPathDevice::ResolvePath(const std::string_view path) {
   // be in the form:
   // some\PATH.foo
   XELOGFS("HostPathDevice::ResolvePath({})", path);
-  return root_entry_->ResolvePath(path);
+  auto entry = root_entry_->ResolvePath(path);
+  if (entry || path.empty()) {
+    return entry;
+  }
+
+  // The entry tree is built once at mount time. When the same host folder is
+  // mounted under several names (the dashboard opens the profile as DASHUSER
+  // and as SkinRoot), a file created through one mount is invisible to the
+  // others. Look at the host filesystem and add what is missing.
+  auto global_lock = global_critical_region_.Acquire();
+  Entry* current = root_entry_.get();
+  size_t pos = 0;
+  while (pos <= path.size()) {
+    size_t next = path.find('\\', pos);
+    if (next == std::string_view::npos) {
+      next = path.size();
+    }
+    const std::string_view part = path.substr(pos, next - pos);
+    pos = next + 1;
+    if (part.empty()) {
+      continue;
+    }
+    Entry* child = current->GetChild(part);
+    if (!child) {
+      auto* parent = static_cast<HostPathEntry*>(current);
+      auto full_path = parent->host_path() / xe::to_path(part);
+      std::error_code ec;
+      if (!std::filesystem::exists(full_path, ec)) {
+        return nullptr;
+      }
+      auto info = xe::filesystem::GetInfo(full_path);
+      if (!info) {
+        return nullptr;
+      }
+      auto* created = HostPathEntry::Create(this, parent, full_path, *info);
+      parent->children_.push_back(std::unique_ptr<Entry>(created));
+      if (info->type == xe::filesystem::FileInfo::Type::kDirectory) {
+        PopulateEntry(created);
+      }
+      XELOGW("HostPathDevice: picked up new host entry {}",
+             xe::path_to_utf8(full_path));
+      child = created;
+    }
+    current = child;
+  }
+  return current;
 }
 
 void HostPathDevice::PopulateEntry(HostPathEntry* parent_entry) {
