@@ -107,6 +107,11 @@ dword_result_t NtCreateFile_entry(lpdword_t handle_out, dword_t desired_access,
 
   *handle_out = handle;
 
+  XELOGW("DASHTRACE NtCreateFile '{}' access={:X} disp={} opts={:X} -> {:08X}",
+         target_path, static_cast<uint32_t>(desired_access),
+         static_cast<uint32_t>(creation_disposition),
+         static_cast<uint32_t>(create_options), static_cast<uint32_t>(result));
+
   return result;
 }
 DECLARE_XBOXKRNL_EXPORT1(NtCreateFile, kFileSystem, kImplemented);
