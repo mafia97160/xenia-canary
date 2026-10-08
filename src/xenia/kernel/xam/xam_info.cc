@@ -1238,6 +1238,13 @@ DECLARE_XAM_EXPORT1(XamGetDefaultSystemImage, kNone, kStub);
 dword_result_t XamPackageManagerGetExperienceMode_entry(
     const ppc_context_t& ctx) {
   TraceDashboardCall("XamPackageManagerGetExperienceMode", ctx);
+  // r3 = pointer to a DWORD. The "Customize Avatar" handler only goes on when
+  // bit 1 (0x2) of the value is set, otherwise it shows a "feature requires an
+  // update" message. Report that bit as set.
+  const uint32_t out_ptr = static_cast<uint32_t>(ctx->r[3]);
+  if (out_ptr) {
+    xe::store_and_swap<uint32_t>(kernel_memory()->TranslateVirtual(out_ptr), 2);
+  }
   return 0;
 }
 DECLARE_XAM_EXPORT1(XamPackageManagerGetExperienceMode, kNone, kStub);
@@ -1344,6 +1351,48 @@ dword_result_t XamLoaderGetPriorTitleId_entry(const ppc_context_t& ctx) {
   return 0;
 }
 DECLARE_XAM_EXPORT1(XamLoaderGetPriorTitleId, kNone, kStub);
+
+
+dword_result_t XamPackageManagerGetFileSize_entry(const ppc_context_t& ctx) {
+  TraceDashboardCall("XamPackageManagerGetFileSize", ctx);
+  // r3 = file name (e.g. "AvatarEditor.xex"). The caller treats 0 as "not
+  // available", so return the size of the file next to the dashboard (min 1).
+  const uint32_t name_ptr = static_cast<uint32_t>(ctx->r[3]);
+  const std::filesystem::path host = GetExecutableHostPath();
+  if (!name_ptr || host.empty()) {
+    return 0;
+  }
+  const char* name_raw = kernel_memory()->TranslateVirtual<const char*>(name_ptr);
+  const std::string name(name_raw, strnlen(name_raw, 260));
+  std::error_code ec;
+  const auto size = std::filesystem::file_size(host.parent_path() / name, ec);
+  if (ec) {
+    return 0;
+  }
+  return size ? static_cast<uint32_t>(size) : 1;
+}
+DECLARE_XAM_EXPORT1(XamPackageManagerGetFileSize, kNone, kStub);
+
+dword_result_t XamLaunchAvatarEditor_entry(const ppc_context_t& ctx) {
+  TraceDashboardCall("XamLaunchAvatarEditor", ctx);
+  const std::filesystem::path current = GetExecutableHostPath();
+  if (current.empty()) {
+    XELOGW("DASHTRACE cannot find the host path of the running module");
+    return 0;
+  }
+  const std::filesystem::path target = current.parent_path() / "AvatarEditor.xex";
+  if (!std::filesystem::exists(target)) {
+    XELOGW("DASHTRACE AvatarEditor.xex not found next to the dashboard");
+    return 0;
+  }
+  {
+    std::ofstream out(kDashReturnFileName, std::ios::trunc);
+    out << xe::path_to_utf8(current) << "\n";
+  }
+  SwitchToModule(target);
+  return 0;  // Only reached if the switch failed.
+}
+DECLARE_XAM_EXPORT1(XamLaunchAvatarEditor, kNone, kStub);
 
 }  // namespace xam
 }  // namespace kernel
