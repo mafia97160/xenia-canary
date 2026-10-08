@@ -60,7 +60,30 @@ Entry* HostPathEntry::FindOrAddChild(const std::string_view name) {
   auto full_path = host_path_ / xe::to_path(name);
   std::error_code ec;
   if (!std::filesystem::exists(full_path, ec)) {
-    return nullptr;
+    // The dashboard asks for theme images without an extension
+    // ("Theme2\WallPaper1") while the dumped files carry one
+    // ("Wallpaper1.jpg"). Try the usual image extensions.
+    bool found = false;
+    if (name.find('.') == std::string_view::npos) {
+      for (const char* ext : {".jpg", ".png", ".jpeg"}) {
+        const std::string with_ext = std::string(name) + ext;
+        if (auto* cached = GetChild(with_ext)) {
+          XELOGW("DASHTRACE extension fallback: '{}' -> '{}'", name, with_ext);
+          return cached;
+        }
+        auto candidate = host_path_ / xe::to_path(with_ext);
+        if (std::filesystem::exists(candidate, ec)) {
+          XELOGW("DASHTRACE extension fallback: '{}' -> '{}'", name,
+                 xe::path_to_utf8(candidate.filename()));
+          full_path = candidate;
+          found = true;
+          break;
+        }
+      }
+    }
+    if (!found) {
+      return nullptr;
+    }
   }
   auto info = xe::filesystem::GetInfo(full_path);
   if (!info) {
