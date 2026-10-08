@@ -1121,26 +1121,6 @@ bool XexModule::LoadContinue() {
       assert_not_null(string_table[library_name_index]);
       auto library_name = std::string(string_table[library_name_index]);
 
-      // Dashboard plug-ins import from the dashboard itself using the bare
-      // library name "dash" while the module is loaded as "$flash_dash.xex".
-      // Point such an import at the running executable.
-      if (library_name.find('.') == std::string::npos) {
-        if (auto exe = kernel_state_->GetExecutableModule()) {
-          std::string exe_name =
-              std::string(utf8::find_name_from_guest_path(exe->path()));
-          if (exe_name.rfind("$flash_", 0) == 0) {
-            exe_name.erase(0, 7);
-          }
-          const auto dot = exe_name.rfind('.');
-          if (dot != std::string::npos) {
-            exe_name.resize(dot);
-          }
-          if (utf8::equal_case(exe_name, library_name)) {
-            library_name = exe->path();
-          }
-        }
-      }
-
       if (!kernel_state_->IsModuleLoaded(library_name)) {
         if (auto module = kernel_state_->LoadUserModule(library_name)) {
           if (kernel_state_->FinishLoadingUserModule(module, false)) {
@@ -1248,6 +1228,28 @@ bool XexModule::SetupLibraryImports(const std::string_view name,
   }
 
   auto user_module = kernel_state_->GetModule(name);
+
+  // Dashboard plug-ins import from the dashboard itself using the bare
+  // library name "dash" while the running module is "$flash_dash.xex".
+  // Bind such imports to the running executable.
+  if (!user_module && name.find('.') == std::string_view::npos) {
+    if (auto exe = kernel_state_->GetExecutableModule()) {
+      std::string exe_name =
+          std::string(utf8::find_name_from_guest_path(exe->path()));
+      if (exe_name.rfind("$flash_", 0) == 0) {
+        exe_name.erase(0, 7);
+      }
+      const auto dot = exe_name.rfind('.');
+      if (dot != std::string::npos) {
+        exe_name.resize(dot);
+      }
+      if (utf8::equal_case(exe_name, name)) {
+        user_module = kernel::retain_object<kernel::XModule>(exe.get());
+        XELOGW("Binding import library '{}' to running module {}", name,
+               exe->path());
+      }
+    }
+  }
 
   auto base_name = utf8::find_base_name_from_guest_path(name);
 
