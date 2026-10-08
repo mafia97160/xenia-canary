@@ -23,7 +23,9 @@
 #include "xenia/kernel/xenumerator.h"
 #include "xenia/ui/imgui_dialog.h"
 #include "xenia/ui/imgui_drawer.h"
+#include "xenia/vfs/devices/host_path_entry.h"
 #include "xenia/vfs/devices/stfs_xbox.h"
+#include "xenia/vfs/virtual_file_system.h"
 #include "xenia/xbox.h"
 
 DEFINE_int32(
@@ -503,10 +505,30 @@ dword_result_t XamContentOpenFile_entry(
     dword_t user_index, lpstring_t root_name, lpstring_t path, dword_t flags,
     lpdword_t disposition_ptr, lpdword_t license_mask_ptr,
     pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
-  // TODO(gibbed): arguments assumed based on XamContentCreate.
-  return X_ERROR_FILE_NOT_FOUND;
+  // Arguments confirmed from the dashboard's call: (0xFF, "theme", the path
+  // returned by XamPackageManagerFindPackageContainingIndexedXEX, 0x43, ...).
+  // Mounts the package (folder or container) at `path` under `root_name`.
+  X_RESULT result = X_ERROR_FILE_NOT_FOUND;
+  vfs::Entry* entry = kernel_state()->file_system()->ResolvePath(path.value());
+  if (auto* host_entry = dynamic_cast<vfs::HostPathEntry*>(entry)) {
+    if (kernel_state()->content_manager()->OpenAndMountPackage(
+            host_entry->host_path(), root_name.value())) {
+      result = X_ERROR_SUCCESS;
+      if (disposition_ptr) {
+        *disposition_ptr = 1;  // XCONTENT_OPEN_EXISTING
+      }
+    }
+  }
+  XELOGW("DASHTRACE XamContentOpenFile root='{}' path='{}' flags={:X} -> {:08X}",
+         root_name.value(), path.value(), static_cast<uint32_t>(flags),
+         static_cast<uint32_t>(result));
+  if (overlapped_ptr) {
+    kernel_state()->CompleteOverlappedImmediate(overlapped_ptr, result);
+    return X_ERROR_IO_PENDING;
+  }
+  return result;
 }
-DECLARE_XAM_EXPORT1(XamContentOpenFile, kContent, kStub);
+DECLARE_XAM_EXPORT1(XamContentOpenFile, kContent, kImplemented);
 
 dword_result_t XamContentFlush_entry(lpstring_t root_name,
                                      pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
