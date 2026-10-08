@@ -1232,7 +1232,12 @@ bool XexModule::SetupLibraryImports(const std::string_view name,
   // Dashboard plug-ins import from the dashboard itself using the bare
   // library name "dash" while the running module is "$flash_dash.xex".
   // Bind such imports to the running executable.
-  if (!user_module && name.find('.') == std::string_view::npos) {
+  if (!user_module && !kernel_resolver) {
+    std::string lib_stem =
+        std::string(utf8::find_name_from_guest_path(name));
+    if (const auto lib_dot = lib_stem.rfind('.'); lib_dot != std::string::npos) {
+      lib_stem.resize(lib_dot);
+    }
     if (auto exe = kernel_state_->GetExecutableModule()) {
       std::string exe_name =
           std::string(utf8::find_name_from_guest_path(exe->path()));
@@ -1243,7 +1248,7 @@ bool XexModule::SetupLibraryImports(const std::string_view name,
       if (dot != std::string::npos) {
         exe_name.resize(dot);
       }
-      if (utf8::equal_case(exe_name, name)) {
+      if (utf8::equal_case(exe_name, lib_stem)) {
         user_module = kernel::retain_object<kernel::XModule>(exe.get());
         XELOGW("Binding import library '{}' to running module {}", name,
                exe->path());
