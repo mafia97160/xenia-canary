@@ -233,6 +233,12 @@ X_STATUS VirtualFileSystem::OpenFile(Entry* root_entry,
 
     auto file_name = xe::utf8::find_name_from_guest_path(path);
     entry = parent_entry->GetChild(file_name);
+    if (!entry) {
+      // The host folder may have been changed through another mount.
+      if (auto* host_parent = dynamic_cast<HostPathEntry*>(parent_entry)) {
+        entry = host_parent->FindOrAddChild(file_name);
+      }
+    }
   } else {
     entry = !root_entry ? ResolvePath(path) : root_entry->GetChild(path);
   }

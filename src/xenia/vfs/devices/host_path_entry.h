@@ -32,6 +32,11 @@ class HostPathEntry : public Entry {
 
   const std::filesystem::path& host_path() const { return host_path_; }
 
+  // Returns the child called `name`, adding it to the cached tree first if it
+  // exists on the host but was created after this entry tree was built (e.g.
+  // through another mount of the same folder). Returns nullptr if missing.
+  Entry* FindOrAddChild(const std::string_view name);
+
   X_STATUS Open(uint32_t desired_access, File** out_file) override;
 
   bool can_map() const override { return true; }

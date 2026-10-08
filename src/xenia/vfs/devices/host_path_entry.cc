@@ -53,6 +53,26 @@ HostPathEntry* HostPathEntry::Create(Device* device, Entry* parent,
   return entry;
 }
 
+Entry* HostPathEntry::FindOrAddChild(const std::string_view name) {
+  if (auto* existing = GetChild(name)) {
+    return existing;
+  }
+  auto full_path = host_path_ / xe::to_path(name);
+  std::error_code ec;
+  if (!std::filesystem::exists(full_path, ec)) {
+    return nullptr;
+  }
+  auto info = xe::filesystem::GetInfo(full_path);
+  if (!info) {
+    return nullptr;
+  }
+  auto* created = HostPathEntry::Create(device_, this, full_path, *info);
+  children_.push_back(std::unique_ptr<Entry>(created));
+  XELOGW("HostPathEntry: picked up new host entry {}",
+         xe::path_to_utf8(full_path));
+  return created;
+}
+
 X_STATUS HostPathEntry::Open(uint32_t desired_access, File** out_file) {
   if (is_read_only() && (desired_access & (FileAccess::kFileWriteData |
                                            FileAccess::kFileAppendData))) {
