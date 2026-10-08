@@ -1264,8 +1264,9 @@ dword_result_t XamPackageManagerFindPackageContainingIndexedXEX_entry(
       !std::filesystem::exists(host.parent_path() / name)) {
     return 0;
   }
-  std::string guest_dir = module->path();
-  guest_dir.resize(guest_dir.find_last_of("\\/") + 1);
+  // The virtual flash (\Device\Flash) is the dashboard's own folder, exactly
+  // like the flash of a real console.
+  std::string guest_dir = "\\Device\\Flash\\";
   if (guest_dir.size() + 1 > out_size) {
     return 0;
   }

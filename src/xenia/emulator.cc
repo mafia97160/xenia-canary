@@ -625,6 +625,19 @@ X_STATUS Emulator::LaunchXexFile(const std::filesystem::path& path) {
   const std::string mount_path =
       utf8::find_base_guest_path(kernel_state_->GetExecutableModule()->path());
 
+  // Virtual flash: the dashboard folder is exposed as \Device\Flash, the way
+  // the NAND's file system appears on a real console (read-only).
+  {
+    auto flash = std::make_unique<vfs::HostPathDevice>(
+        "\\Device\\Flash", path.parent_path(), true);
+    if (flash->Initialize() && file_system_->RegisterDevice(std::move(flash))) {
+      file_system_->RegisterSymbolicLink("flash:", "\\Device\\Flash");
+      XELOGI("Virtual flash mounted: {}", xe::path_to_utf8(path.parent_path()));
+    } else {
+      XELOGE("Unable to mount the virtual flash");
+    }
+  }
+
   // System related symlinks. This should point to dashboard location in the
   // future.
   file_system_->RegisterSymbolicLink("\\SystemRoot", mount_path);
