@@ -8,6 +8,7 @@
  */
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -1220,12 +1221,62 @@ DECLARE_XAM_EXPORT1(XdfInitialize, kNone, kStub);
 
 dword_result_t XdfLoadXexFromCache_entry(const ppc_context_t& ctx) {
   TraceDashboardCall("XdfLoadXexFromCache", ctx);
-  // Observed: r3 = module file name (e.g. "dash.privacyui.xex"). The real
-  // function loads a dashboard plugin from the feature cache; that cache does
-  // not exist here, so report "not found" (negative status) instead of the
-  // fake success that made the dashboard look up CreateDashAppInstance in
-  // itself. The dashboard's reaction to a failure is what we want to see next.
-  return X_STATUS_NO_SUCH_FILE;
+  // Read from the dashboard's own call sites: (r3 = module name, r4 = flags,
+  // r5 = 0, r6 = pointer receiving the module handle). The dashboard then
+  // resolves exports by name on that handle, so this is XexLoadImage on a
+  // module that lives next to the dashboard. Only the modules below are
+  // loaded for now; any other name keeps reporting "not found".
+  const uint32_t name_ptr = static_cast<uint32_t>(ctx->r[3]);
+  const uint32_t out_ptr = static_cast<uint32_t>(ctx->r[6]);
+  if (!name_ptr || !out_ptr) {
+    return X_STATUS_NO_SUCH_FILE;
+  }
+  const char* name_raw =
+      kernel_memory()->TranslateVirtual<const char*>(name_ptr);
+  const std::string name(name_raw, strnlen(name_raw, 260));
+  static const char* const kLoadable[] = {"dash.firstuse.xex",
+                                          "dash.privacyui.xex"};
+  bool allowed = false;
+  for (const char* candidate : kLoadable) {
+    const std::string_view cand(candidate);
+    if (name.size() == cand.size() &&
+        std::equal(name.begin(), name.end(), cand.begin(),
+                   [](char a, char b) {
+                     return std::tolower(static_cast<unsigned char>(a)) ==
+                            std::tolower(static_cast<unsigned char>(b));
+                   })) {
+      allowed = true;
+    }
+  }
+  if (!allowed) {
+    return X_STATUS_NO_SUCH_FILE;
+  }
+
+  uint32_t hmodule = 0;
+  X_STATUS result = X_STATUS_NO_SUCH_FILE;
+  auto existing = kernel_state()->GetModule(name);
+  if (existing) {
+    hmodule = existing->hmodule_ptr();
+    result = X_STATUS_SUCCESS;
+  } else {
+    auto user_module = kernel_state()->LoadUserModule(name);
+    if (user_module) {
+      kernel_state()->ApplyTitleUpdate(user_module);
+      kernel_state()->FinishLoadingUserModule(user_module);
+      auto raw = user_module.release();
+      hmodule = raw->hmodule_ptr();
+      result = X_STATUS_SUCCESS;
+    }
+  }
+  if (hmodule) {
+    auto ldr = kernel_memory()->TranslateVirtual<X_LDR_DATA_TABLE_ENTRY*>(hmodule);
+    ldr->load_count++;
+  }
+  xe::store_and_swap<uint32_t>(kernel_memory()->TranslateVirtual(out_ptr),
+                               hmodule);
+  XELOGW("DASHTRACE XdfLoadXexFromCache '{}' -> {:08X} hmodule={:08X}", name,
+         static_cast<uint32_t>(result), hmodule);
+  return result;
 }
 DECLARE_XAM_EXPORT1(XdfLoadXexFromCache, kNone, kStub);
 
