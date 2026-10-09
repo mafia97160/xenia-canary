@@ -132,8 +132,10 @@ struct X_TEMPERATURE_DATA {
   void SetTemp(float celsius_temp) {
     const uint16_t value = static_cast<uint16_t>(celsius_temp * 256.0f);
 
-    integer_value_ = value & 0xFF;
-    fractional_value_ = value >> 8;
+    // Guest code reads the pair as a big-endian 8.8 fixed point word
+    // (integer byte first), as Freestyle Dash does.
+    integer_value_ = value >> 8;
+    fractional_value_ = value & 0xFF;
   }
 };
 

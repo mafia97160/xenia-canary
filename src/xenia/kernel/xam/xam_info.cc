@@ -566,6 +566,39 @@ dword_result_t XamLoaderGetLaunchData_entry(lpvoid_t buffer_ptr,
 }
 DECLARE_XAM_EXPORT1(XamLoaderGetLaunchData, kNone, kSketchy);
 
+static bool SwitchToModule(const std::filesystem::path& target);
+static std::filesystem::path GetExecutableHostPath();
+static constexpr const char* kDashReturnFileNameFwd = "xenia_dashboard_return.txt";
+
+// Console behaviour: a launcher (Freestyle Dash...) asks the kernel to start
+// another executable by guest path ("Hdd1:\\Games\\X\\default.xex"). When that
+// path maps to a real host file, remember the launcher and switch to it.
+static void TryLaunchHostTitle(const std::string& guest_path) {
+  auto entry = kernel_state()->file_system()->ResolvePath(guest_path);
+  auto host_entry = dynamic_cast<vfs::HostPathEntry*>(entry);
+  if (!host_entry) {
+    XELOGW("DASHTRACE launch '{}': not backed by a host path", guest_path);
+    return;
+  }
+  std::filesystem::path target = host_entry->host_path();
+  std::error_code ec;
+  if (std::filesystem::is_directory(target, ec)) {
+    target /= "default.xex";
+  }
+  if (!std::filesystem::exists(target, ec)) {
+    XELOGW("DASHTRACE launch '{}': {} does not exist", guest_path,
+           xe::path_to_utf8(target));
+    return;
+  }
+  const std::filesystem::path current = GetExecutableHostPath();
+  if (!current.empty() && current != target) {
+    std::ofstream out(kDashReturnFileNameFwd, std::ios::trunc);
+    out << xe::path_to_utf8(current) << "\n";
+  }
+  XELOGW("DASHTRACE launch '{}' -> {}", guest_path, xe::path_to_utf8(target));
+  SwitchToModule(target);  // Only returns on failure.
+}
+
 void XamLoaderLaunchTitle_entry(lpstring_t raw_name_ptr, dword_t flags) {
   auto xam = kernel_state()->GetKernelModule<XamModule>("xam.xex");
 
@@ -578,6 +611,7 @@ void XamLoaderLaunchTitle_entry(lpstring_t raw_name_ptr, dword_t flags) {
   // Translate the launch path to a full path.
   if (raw_name_ptr && !raw_name_ptr.value().empty()) {
     loader_data.launch_path = xe::path_to_utf8(raw_name_ptr.value());
+    TryLaunchHostTitle(loader_data.launch_path);
     xam->SaveLoaderData();
     title = "Title was restarted";
     message =
