@@ -10,7 +10,72 @@
 #include "xenia/kernel/smc.h"
 #include "xenia/kernel/util/shim_utils.h"
 
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+
+#include "xenia/base/platform.h"
+#if XE_PLATFORM_WIN32
+#include "xenia/base/platform_win.h"
+#endif
+
 DECLARE_int32(avpack);
+
+DEFINE_double(smc_temp_cpu, 0.0,
+              "Force the CPU temperature (Celsius) reported by the virtual "
+              "SMC. 0 = derive it from the host CPU load.",
+              "Kernel");
+DEFINE_double(smc_temp_gpu, 0.0,
+              "Force the GPU temperature (Celsius) reported by the virtual "
+              "SMC. 0 = derive it from the host CPU load.",
+              "Kernel");
+DEFINE_double(smc_temp_edram, 0.0,
+              "Force the eDRAM temperature (Celsius) reported by the virtual "
+              "SMC. 0 = derive it from the host CPU load.",
+              "Kernel");
+DEFINE_double(smc_temp_board, 0.0,
+              "Force the motherboard temperature (Celsius) reported by the "
+              "virtual SMC. 0 = derive it from the host CPU load.",
+              "Kernel");
+
+namespace {
+// Host CPU load in [0,1] since the previous call (-1 when unavailable).
+double SampleHostCpuLoad() {
+#if XE_PLATFORM_WIN32
+  static ULONGLONG last_idle = 0, last_total = 0;
+  FILETIME idle_ft, kernel_ft, user_ft;
+  if (!GetSystemTimes(&idle_ft, &kernel_ft, &user_ft)) return -1.0;
+  auto to_u64 = [](const FILETIME& f) {
+    return (static_cast<ULONGLONG>(f.dwHighDateTime) << 32) | f.dwLowDateTime;
+  };
+  const ULONGLONG idle = to_u64(idle_ft);
+  const ULONGLONG total = to_u64(kernel_ft) + to_u64(user_ft);  // incl. idle
+  const ULONGLONG d_idle = idle - last_idle, d_total = total - last_total;
+  last_idle = idle;
+  last_total = total;
+  if (!d_total) return -1.0;
+  return 1.0 - static_cast<double>(d_idle) / static_cast<double>(d_total);
+#else
+  static unsigned long long last_idle = 0, last_total = 0;
+  FILE* f = std::fopen("/proc/stat", "r");
+  if (!f) return -1.0;
+  unsigned long long v[8] = {};
+  const int n = std::fscanf(f, "cpu %llu %llu %llu %llu %llu %llu %llu %llu",
+                            &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6],
+                            &v[7]);
+  std::fclose(f);
+  if (n < 4) return -1.0;
+  unsigned long long total = 0;
+  for (auto x : v) total += x;
+  const unsigned long long idle = v[3] + v[4];
+  const auto d_idle = idle - last_idle, d_total = total - last_total;
+  last_idle = idle;
+  last_total = total;
+  if (!d_total) return -1.0;
+  return 1.0 - static_cast<double>(d_idle) / static_cast<double>(d_total);
+#endif
+}
+}  // namespace
 
 namespace xe {
 namespace kernel {
@@ -77,10 +142,35 @@ void SystemManagementController::QueryTemperatureSensor(
   }
 
   smc_response->command = smc_message->command;
-  smc_response->temps.cpu.SetTemp(69.6f);
-  smc_response->temps.gpu.SetTemp(69.9f);
-  smc_response->temps.edram.SetTemp(69.6f);
-  smc_response->temps.mb.SetTemp(69.9f);
+
+  // Virtual thermal model. A real console reads thermistors; here the values
+  // follow the host CPU load (smoothed), and each can be forced with the
+  // smc_temp_* cvars.
+  const auto now = std::chrono::steady_clock::now();
+  if (now - last_temp_sample_ >= std::chrono::milliseconds(500) ||
+      last_temp_sample_ == std::chrono::steady_clock::time_point{}) {
+    last_temp_sample_ = now;
+    const double load = SampleHostCpuLoad();
+    if (load >= 0.0) {
+      host_load_ = host_load_ * 0.7 + std::clamp(load, 0.0, 1.0) * 0.3;
+    }
+  }
+  const float load = static_cast<float>(host_load_);
+  const float cpu = 48.0f + 32.0f * load;
+  const float gpu = 46.0f + 30.0f * load;
+  const float edram = 44.0f + 28.0f * load;
+  const float board = 40.0f + 18.0f * load;
+  auto pick = [](double forced, float modelled) {
+    return forced > 0.0 ? static_cast<float>(forced) : modelled;
+  };
+  last_temps_[0] = pick(cvars::smc_temp_cpu, cpu);
+  last_temps_[1] = pick(cvars::smc_temp_gpu, gpu);
+  last_temps_[2] = pick(cvars::smc_temp_edram, edram);
+  last_temps_[3] = pick(cvars::smc_temp_board, board);
+  smc_response->temps.cpu.SetTemp(last_temps_[0]);
+  smc_response->temps.gpu.SetTemp(last_temps_[1]);
+  smc_response->temps.edram.SetTemp(last_temps_[2]);
+  smc_response->temps.mb.SetTemp(last_temps_[3]);
 }
 
 void SystemManagementController::QueryDriveTraySensor(

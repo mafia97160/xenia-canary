@@ -11,6 +11,7 @@
 #define XENIA_KERNEL_SMC_H_
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -251,6 +252,10 @@ class SystemManagementController {
   X_DVD_TRAY_STATE dvd_tray_state_ = X_DVD_TRAY_STATE::OPEN;
   REMOTE_CONTROL ir_address_ = REMOTE_CONTROL::MEDIA_REMOTE_360;
   TILT_STATE tilt_state_ = TILT_STATE::VERTICAL;
+
+  std::chrono::steady_clock::time_point last_temp_sample_{};
+  double host_load_ = 0.0;
+  float last_temps_[4] = {};
 
   uint32_t cpu_fan_speed_ = 100;
   uint32_t gpu_fan_speed_ = 100;
