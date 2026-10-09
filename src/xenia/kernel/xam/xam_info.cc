@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -460,8 +461,26 @@ static bool RestartEmulatorProcess() {
   if (!GetModuleFileNameW(nullptr, exe_path, MAX_PATH)) {
     return false;
   }
-  // No arguments: the loader data written below decides what runs.
+  // Keep the option flags (--cvar=value) of this run so the next module behaves
+  // the same way, but not the positional executable path: the loader data
+  // written by SwitchToModule decides what runs. A log file gets a suffix so
+  // the log of the module that is closing is not overwritten.
   std::wstring command_line = L"\"" + std::wstring(exe_path) + L"\"";
+  for (int i = 1; i < __argc; ++i) {
+    std::wstring arg = __wargv[i];
+    if (arg.rfind(L"--", 0) != 0) {
+      continue;
+    }
+    if (arg.rfind(L"--log_file=", 0) == 0) {
+      const size_t dot = arg.rfind(L'.');
+      if (dot != std::wstring::npos && dot > 11) {
+        arg.insert(dot, L"_next");
+      } else {
+        arg += L"_next";
+      }
+    }
+    command_line += L" \"" + arg + L"\"";
+  }
   STARTUPINFOW startup_info = {};
   startup_info.cb = sizeof(startup_info);
   PROCESS_INFORMATION process_info = {};
